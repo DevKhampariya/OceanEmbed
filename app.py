@@ -8,7 +8,57 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 from train_model import OceanEmbedUNet, load_and_preprocess_nc
 
+# ---------------------------------------------------------------------------
+# Deployment: download the large runtime artifacts from Hugging Face.
+# The files are kept outside GitHub because the GLORYS NetCDF is ~612 MB.
+# If the files already exist locally, nothing is downloaded.
+# ---------------------------------------------------------------------------
+HF_DATA_URL = (
+    "https://huggingface.co/datasets/DevKhampariya/oceanembed-data/"
+    "resolve/main/glorys_subset.nc"
+)
+HF_MODEL_URL = (
+    "https://huggingface.co/datasets/DevKhampariya/oceanembed-data/"
+    "resolve/main/oceanembed_model.pth"
+)
+
+def ensure_file_from_huggingface(url, destination):
+    """Download a runtime artifact from Hugging Face if it is missing."""
+    if os.path.exists(destination):
+        return
+
+    os.makedirs(os.path.dirname(destination) or ".", exist_ok=True)
+    temp_path = destination + ".part"
+
+    # Remove an incomplete download left by a previous failed run.
+    if os.path.exists(temp_path):
+        os.remove(temp_path)
+
+    request = Request(url, headers={"User-Agent": "OceanEmbed/1.0"})
+
+    try:
+        with urlopen(request, timeout=60) as response:
+            with open(temp_path, "wb") as output_file:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output_file.write(chunk)
+
+        # Only expose the completed file to the rest of the app.
+        os.replace(temp_path, destination)
+
+    except Exception:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise
+
 st.set_page_config(layout="wide", page_title="OceanEmbed PoC Dashboard")
+
+# Download the trained checkpoint and GLORYS input data when running on
+# Streamlit Cloud (or any fresh environment). Existing local files are reused.
+ensure_file_from_huggingface(HF_MODEL_URL, "oceanembed_model.pth")
+ensure_file_from_huggingface(HF_DATA_URL, "data/glorys_subset.nc")
 
 # Presentation-only styling: the model, controls, and inference flow remain unchanged.
 st.markdown(
@@ -30,7 +80,14 @@ st.markdown(
     .stButton > button:hover { color:#021925 !important; transform:translateY(-1px); box-shadow:0 10px 23px rgba(0,0,0,.30); }
     [data-baseweb="select"] > div,[data-baseweb="slider"] div[role="slider"] { background-color:#0a4e67 !important; border-color:rgba(161,235,239,.34) !important; }
     [data-testid="stDivider"] { border-color:rgba(160,232,236,.18); }
-    [data-testid="stSpinner"] { color:#8ff1f3; }
+    /* The built-in spinner is too faint on this dark background. The custom
+       processing banner below is the single, accessible run indicator. */
+    [data-testid="stSpinner"] { display:none !important; }
+    .processing-banner { display:flex; align-items:center; gap:14px; margin:.25rem 0 1.2rem; padding:1rem 1.2rem; border:1px solid rgba(128,233,239,.44); border-radius:14px; background:linear-gradient(100deg,rgba(12,99,125,.92),rgba(8,54,82,.92)); box-shadow:0 12px 28px rgba(0,13,29,.24); color:#edfeff; }
+    .processing-orbit { width:26px; height:26px; box-sizing:border-box; border:3px solid rgba(191,249,250,.25); border-top-color:#9af6f3; border-right-color:#f5d79a; border-radius:50%; animation:ocean-spin .85s linear infinite; flex:0 0 auto; }
+    .processing-title { font-family:'Space Grotesk',sans-serif; font-size:1.02rem; font-weight:700; }
+    .processing-detail { color:#b8e8ec; font-size:.88rem; margin-top:2px; }
+    @keyframes ocean-spin { to { transform:rotate(360deg); } }
     </style>
     """, unsafe_allow_html=True,
 )
@@ -133,13 +190,23 @@ if run_button:
     if not os.path.exists(data_path):
         st.error("Dataset not found! Please ensure glorys_subset.nc exists in ./data/")
     else:
+        processing_notice = st.empty()
+        processing_notice.markdown(
+            """
+            <div class="processing-banner">
+                <div class="processing-orbit"></div>
+                <div><div class="processing-title">Executing 3D Neural Inference…</div></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         with st.spinner("Executing 3D Neural Inference..."):
             inputs, targets, ocean_mask, targets_raw, lats, lons = load_and_preprocess_nc(data_path)
-            
             with torch.no_grad():
                 preds_norm, latent_embed = model(inputs)
                 
             preds_denorm = preds_norm.numpy() * (t_max - t_min) + t_min
+            processing_notice.empty()
             
             # Map selected geographic lat/lon to closest array index
             lat_idx = int(np.abs(lats - selected_lat).argmin())
