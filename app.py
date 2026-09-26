@@ -403,6 +403,12 @@ def get_ocean_region(latitude, longitude):
     )
 
 
+@st.cache_resource(show_spinner=False)
+def load_preprocessed_data(data_path):
+    """Cache the expensive GLORYS preprocessing for repeated demo runs."""
+    return load_and_preprocess_nc(str(data_path))
+
+
 @st.cache_resource
 def load_trained_model():
     model = OceanEmbedUNet()
@@ -530,7 +536,7 @@ if run_button:
     with st.spinner("Executing 3D Neural Inference..."):
 
         inputs, targets, ocean_mask, targets_raw, lats, lons = (
-            load_and_preprocess_nc(str(data_path))
+            load_preprocessed_data(data_path)
         )
 
         with torch.no_grad():
@@ -697,7 +703,7 @@ if run_button:
 
 
     st.caption(
-        f"Selected region: **{selected_region}** · "
+        f"Selected region: **{selected_region}** • "
         f"{lats[lat_idx]:.2f}°N, "
         f"{lons[lon_idx]:.2f}°E"
     )
@@ -777,6 +783,7 @@ if run_button:
         )
 
         st.pyplot(fig1)
+        plt.close(fig1)
 
 
     with col2:
@@ -831,6 +838,7 @@ if run_button:
         )
 
         st.pyplot(fig2)
+        plt.close(fig2)
 
 
     st.divider()
@@ -981,6 +989,7 @@ if run_button:
     fig_volume.tight_layout()
 
     st.pyplot(fig_volume)
+    plt.close(fig_volume)
 
 
     st.divider()
@@ -1032,6 +1041,7 @@ if run_button:
 
 
         st.pyplot(fig3)
+        plt.close(fig3)
 
 
     with col4:
@@ -1110,3 +1120,4 @@ if run_button:
 
 
             st.pyplot(fig4)
+            plt.close(fig4)
